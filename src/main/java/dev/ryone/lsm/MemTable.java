@@ -7,6 +7,12 @@ import java.time.Instant;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class MemTable {
     private static final String SSTABLE_FILE_NAME_PREFIX = "sstable";
@@ -14,11 +20,8 @@ public class MemTable {
     private static final String SSTABLE_FILE_NAME_EXT = ".db";
     private static final String KEY_VALUE_JOINER = "\t";
 
-    private final NavigableMap<String, String> table;
-
-    public MemTable() {
-        table = new TreeMap<>();
-    }
+    private final NavigableMap<String, String> table = new TreeMap<>();
+    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     public final int size() {
         return table.size();
@@ -33,9 +36,9 @@ public class MemTable {
         table.put(key, value);
     }
 
-    public final synchronized void flush() throws IOException {
+    public final synchronized void flush() throws ExecutionException, InterruptedException {
         if (size() > 0) {
-            writeToSSTable(snapshot());
+            writeToSSTable(snapshot()).get();
         }
         clear();
     }
@@ -44,29 +47,38 @@ public class MemTable {
         return new TreeMap<>(table);
     }
 
-    private synchronized void writeToSSTable(NavigableMap<String, String> snapshot) throws IOException {
-        var now = Instant.now();
-        var second = now.getEpochSecond();
-        var nano = now.getNano();
+    private synchronized Future<?> writeToSSTable(NavigableMap<String, String> snapshot) {
+        Logger logger = Logger.getLogger(MemTable.class.getName());
 
-        var path = Paths.get(
-                SSTABLE_FILE_NAME_PREFIX +
-                        SSTABLE_FILE_NAME_INFIX +
-                        second +
-                        SSTABLE_FILE_NAME_INFIX +
-                        nano +
-                        SSTABLE_FILE_NAME_EXT
-        );
-        if (Files.notExists(path)) {
-            Files.createFile(path);
-        }
+        return executor.submit(() -> {
+            var now = Instant.now();
+            var second = now.getEpochSecond();
+            var nano = now.getNano();
 
-        try (var writer = Files.newBufferedWriter(path)) {
-            for (var entry : snapshot.entrySet()) {
-                writer.write(entry.getKey() + KEY_VALUE_JOINER + entry.getValue());
-                writer.newLine();
+            var path = Paths.get(
+                    SSTABLE_FILE_NAME_PREFIX +
+                            SSTABLE_FILE_NAME_INFIX +
+                            second +
+                            SSTABLE_FILE_NAME_INFIX +
+                            nano +
+                            SSTABLE_FILE_NAME_EXT
+            );
+
+            try {
+                if (Files.notExists(path)) {
+                    Files.createFile(path);
+                }
+
+                try (var writer = Files.newBufferedWriter(path)) {
+                    for (var entry : snapshot.entrySet()) {
+                        writer.write(entry.getKey() + KEY_VALUE_JOINER + entry.getValue());
+                        writer.newLine();
+                    }
+                }
+            } catch (IOException e) {
+                logger.log(Level.SEVERE, String.format("Failed to write SSTable: %s", e.getMessage()));
             }
-        }
+        });
     }
 
     public final synchronized void clear() {

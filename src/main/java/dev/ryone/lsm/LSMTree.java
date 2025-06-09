@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Stream;
 
 public class LSMTree implements KVS<String, String>, AutoCloseable {
@@ -44,7 +45,7 @@ public class LSMTree implements KVS<String, String>, AutoCloseable {
     }
 
     @Override
-    public synchronized void put(String key, String value) throws IOException {
+    public synchronized void put(String key, String value) throws IOException, ExecutionException, InterruptedException {
         walWriter.write(key + KEY_VALUE_JOINER + value);
         walWriter.newLine();
         walWriter.flush();
@@ -56,12 +57,12 @@ public class LSMTree implements KVS<String, String>, AutoCloseable {
         }
     }
 
-    private synchronized void tableFlush() throws IOException {
+    private synchronized void tableFlush() throws ExecutionException, InterruptedException {
         table.flush();
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws IOException, ExecutionException, InterruptedException {
         walWriter.close();
         tableFlush();
     }
