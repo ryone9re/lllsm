@@ -29,16 +29,15 @@ public class MemTable {
         return Optional.ofNullable(item);
     }
 
-    public final synchronized boolean put(String key, String value) {
+    public final synchronized void put(String key, String value) {
         table.put(key, value);
-        return true;
     }
 
     public final synchronized void flush() throws IOException {
         if (size() > 0) {
             writeToSSTable(snapshot());
         }
-        table.clear();
+        clear();
     }
 
     private synchronized NavigableMap<String, String> snapshot() {
